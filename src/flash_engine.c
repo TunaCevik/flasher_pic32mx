@@ -10,7 +10,6 @@
 #include "uart_dma_function_manager.h"
 #include "init/init_usart.h"
 #include "stm32f4xx_ll_dma.h"
-#include "flash_pic32mx/pseudo_operations.h"
 
 typedef enum {
     FLASH_STATE_ENTER_ENHANCED_ICSP,
@@ -25,43 +24,6 @@ typedef enum {
     FLASH_STATE_FAIL_ABORT,
     FLASH_STATE_IDLE,
 } flash_engine_state_t;
-
-/* TEMP DIAGNOSTIC: prints a uint32_t as 8 hex chars over UART5. No snprintf
- * dependency (keeps this independent of the nosys.specs/stdio question) --
- * just nibble-by-nibble ASCII conversion. Remove once MCHP_STATUS decoding
- * is no longer needed. */
-static void SendHex32(uint32_t value)
-{
-    static const char digits[] = "0123456789ABCDEF";
-    char buf[11] = "0x";
-
-    for (int8_t i = 0; i < 8; i++) {
-        uint8_t nibble = (uint8_t)((value >> ((7 - i) * 4)) & 0xFU);
-        buf[2 + i] = digits[nibble];
-    }
-    buf[10] = '\0';
-    UART5_SendString(buf);
-    UART5_SendString("\r\n");
-}
-
-/* Translate DMA transfer errors to UART5 telemetry */
-static void LogTransferError(uart_dma_result_t result)
-{
-    switch (result) {
-    case UART_DMA_RESULT_HEADER_CRC_ERROR:
-        UART5_SendString("ERR: Header CRC Mismatch\r\n");
-        break;
-    case UART_DMA_RESULT_DATA_CRC_ERROR:
-        UART5_SendString("ERR: Data CRC Mismatch\r\n");
-        break;
-    case UART_DMA_RESULT_PE_FAIL:
-        UART5_SendString("ERR: Target Flash Word Program Failed\r\n");
-        break;
-    default:
-        UART5_SendString("ERR: Unknown DMA Transfer Fault\r\n");
-        break;
-    }
-}
 
 /* Ensure hardware peripherals and target pins are left in a safe state */
 static void AbortAndCleanup(void)
@@ -96,19 +58,6 @@ void FlashEngine_Run(void)
                 state = FLASH_STATE_ERASE_DEVICE;
             } else {
                 UART5_SendString("ERR: Device Not Ready\r\n");
-                UART5_SendString("DIAG: MCHP_STATUS=");
-                SendHex32(result.status_val);
-
-                /* TEMP DIAGNOSTIC: raw MTAP-level Device ID read -- works
-                 * even on a blank/locked/unready device since it's not a PE
-                 * command (PIC32_GetDeviceID() is, and needs the PE already
-                 * running, which we never reach from here). 0xFFFFFFFF or
-                 * 0x00000000 here means the chip itself isn't responding at
-                 * all, not just "not ready yet". */
-                SendCommand(MTAP_IDCODE);
-                UART5_SendString("DIAG: DEVID=");
-                SendHex32(XferData(0));
-
                 state = FLASH_STATE_FAIL_ABORT;
             }
             break;
@@ -156,7 +105,6 @@ void FlashEngine_Run(void)
                 state = FLASH_STATE_DOWNLOAD_FIRMWARE;
             } else {
                 UART5_SendString("ERR: PE Load Aborted\r\n");
-                LogTransferError(result);
                 state = FLASH_STATE_FAIL_ABORT;
             }
             break;
@@ -171,7 +119,6 @@ void FlashEngine_Run(void)
                 state = FLASH_STATE_VERIFY_DEVICE;
             } else {
                 UART5_SendString("ERR: Firmware Flashing Aborted\r\n");
-                LogTransferError(result);
                 state = FLASH_STATE_FAIL_ABORT;
             }
             break;
