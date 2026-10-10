@@ -1,0 +1,7 @@
+docs/Devlog/assets/*.sr
+build/
+.cache/
+compile_commands.json
+__pycache__/
+.env
+.envrc
